@@ -1,7 +1,7 @@
 import socket
 import threading
 import sys
-
+from protocol import encode, decode
 
 active_connections = 0
 lock = threading.Lock()
@@ -21,13 +21,13 @@ def start_server(host, port):
         thread1 = threading.Thread(
             
             target=handle_client,
-            args=(conn, addr),
+            args=(conn, addr, port),
             daemon=True
         )
         thread1.start()
 
 
-def handle_client(conn, addr):
+def handle_client(conn, addr, port):
     
     global active_connections
 
@@ -40,14 +40,32 @@ def handle_client(conn, addr):
         
         while True:
             
-            message = conn.recv(1024).decode()
+            data = conn.recv(4096)
 
-            if not message:
+            if not data:
+                
                 break 
 
-            print(f"[{addr}] {message}")
-            response = f"ACK from {addr}"
-            conn.send(response.encode())
+            message = decode(data)
+            print(f"[RECV {addr}] {message}")
+
+
+            if message.get("type") == "PING":
+                
+                response = {"type": "PONG", "from": port}
+
+            elif message.get("type") == "ECHO":
+                
+                response = {
+                    "type": "ECHO_REPLY",
+                    "message": message.get("message", "")
+                }
+
+            else:
+                
+                response = {"type": "ERROR", "message": "Unknown message type"}
+
+            conn.send(encode(response))
 
     except Exception as e:
         
@@ -69,8 +87,8 @@ def send_message(target_host, target_port, message):
         
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((target_host, target_port))
-        client_socket.send(message.encode())
-        response = client_socket.recv(1024).decode()
+        client_socket.send(encode(message))
+        response = decode(client_socket.recv(4096))
         print(f"[RESPONSE] {response}")
         client_socket.close()
 
@@ -89,13 +107,18 @@ def interactive_client(target_host, target_port):
 
         while True:
             
-            msg = input("Message (type 'exit' to quit): ")
+            message = input("Message (type 'exit' to quit): ")
 
-            if msg.lower() == "exit":
+            if message.lower() == "exit":
                 break
 
-            client_socket.send(msg.encode())
-            response = client_socket.recv(1024).decode()
+            request = {
+                "type": "ECHO",
+                "message": message
+            }
+
+            client_socket.send(encode(request))
+            response = decode(client_socket.recv(4096))
 
             print(f"[RESPONSE] {response}")
 
@@ -109,13 +132,12 @@ def interactive_client(target_host, target_port):
 def main():
     
     if len(sys.argv) != 2:
-        
+    
         print("Usage: python peer.py <port>")
         sys.exit(1)
 
     host = "127.0.0.1"
     port = int(sys.argv[1])
-
     server_thread = threading.Thread(
         target=start_server,
         args=(host, port),
@@ -124,37 +146,45 @@ def main():
     server_thread.start()
 
     while True:
+        
         command = input(
             "\nCommands:\n"
-            "  send <ip> <port> <message>\n"
+            "  ping <ip> <port>\n"
+            "  echo <ip> <port> <message>\n"
             "  connect <ip> <port>\n> "
         )
 
-        if command.startswith("send"):
+        parts = command.split()
+
+        if not parts:
             
-            try:
+            continue
+
+        try:
+
+            if parts[0] == "ping":
                 
-                parts = command.split()
-                target_ip = parts[1]
-                target_port = int(parts[2])
+                ip, port_ = parts[1], int(parts[2])
+
+                send_message(ip, port_, {"type": "PING"})
+
+
+            elif parts[0] == "echo":
+                
+                ip, port_ = parts[1], int(parts[2])
                 message = " ".join(parts[3:])
-                send_message(target_ip, target_port, message)
+                send_message(ip, port_, {
+                    "type": "ECHO",
+                    "message": message
+                })
 
-            except Exception:
+            elif parts[0] == "connect":
                 
-                print("Invalid format. Example:")
-                print("send 127.0.0.1 5002 Hello World!!")
+                ip, port_ = parts[1], int(parts[2])
+                interactive_client(ip, port_)
 
-        elif command.startswith("connect"):
-            try:
-                parts = command.split()
-                target_ip = parts[1]
-                target_port = int(parts[2])
-
-                interactive_client(target_ip, target_port)
-
-            except Exception:
-                print("Usage: connect <ip> <port>")
+        except Exception:
+            print("Invalid command format.")
 
 
 if __name__ == "__main__":
