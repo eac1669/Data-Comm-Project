@@ -200,21 +200,14 @@ def send_message(target_host, target_port, message):
         s.connect((target_host, target_port))
         s.send(encode(message))
         response = decode(s.recv(4096))
-
-        if response.get("type") == "FOUND":
-            
-            print(f"[FOUND] {response['filename']} at {response['host']}:{response['port']}")
-        
-        else:
-            
-            print(f"[RESPONSE] {response}")
-
         s.close()
+
+        return response
 
     except Exception as e:
         
         print(f"[ERROR] Could not send message: {e}")
-
+        return None
 
 def download_file(filename, peer_ip, peer_port, self_port):
 
@@ -325,6 +318,7 @@ def search_network(filename, self_port):
         return
 
     print(f"[INFO] Searching for '{filename}' across peers...")
+    found = False
 
     for ip, port in peers:
         
@@ -334,11 +328,20 @@ def search_network(filename, self_port):
             
             continue
 
-        send_message(ip, port, {
+        response = send_message(ip, port, {
             "type": "SEARCH",
             "filename": filename
         })
 
+        if response and response.get("type") == "FOUND":
+            
+            print(f"[FOUND] {filename} at {response['host']}:{response['port']}")
+            found = True
+            break
+
+    if not found:
+        
+        print(f"[NOT FOUND] {filename} not found in network")
 
 def interactive_client(target_host, target_port):
     
